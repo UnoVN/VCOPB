@@ -1,0 +1,25 @@
+# Danh sach the gioi duoc ap dung tinh nang nay
+enabled-worlds:
+  - "world"
+  - "world_nether"
+  - "pvp_arena"
+
+# Che do hoat dong:
+# - "WORLD_WIDE": Bat tren toan bo world duoc chon (tru khi region bi set 'break-only-player-blocks: deny')
+# - "REGION_ONLY": Chi bat tai cac region co set 'break-only-player-blocks: allow'
+application-mode: "WORLD_WIDE"
+
+# Xu ly chay no (TNT, TNT Minecart, End Crystal, Creeper, Giuong)
+explosions:
+  damage-player-blocks: true
+  protect-natural-blocks: true
+
+# Chan Piston day/keo khoi do nguoi dat de chong glitch toa do
+pistons:
+  prevent-moving-player-blocks: true
+
+# Thong bao
+messages:
+  prefix: "&8[&cShield&8] "
+  cannot-break: "&cBan chi co the pha huy cac khoi do nguoi choi dat!"
+  reload-success: "&aDa cap nhat lai config thanh cong!"
