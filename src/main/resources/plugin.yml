@@ -16,4 +16,3 @@ permissions:
   pbs.bypass:
     description: Quyen pha moi block bat ke nguon goc
     default: op
-    
