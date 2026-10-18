@@ -3,7 +3,6 @@ package com.pbs.hook;
 import com.pbs.PlayerBlockShield;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldguard.WorldGuard;
-import com.sk89q.worldguard.bukkit.WorldGuardPlugin;
 import com.sk89q.worldguard.protection.ApplicableRegionSet;
 import com.sk89q.worldguard.protection.flags.Flag;
 import com.sk89q.worldguard.protection.flags.StateFlag;
@@ -12,7 +11,6 @@ import com.sk89q.worldguard.protection.flags.registry.FlagRegistry;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.protection.regions.RegionQuery;
 import org.bukkit.Location;
-import org.bukkit.entity.Player;
 
 public class WorldGuardHook {
 
@@ -21,7 +19,8 @@ public class WorldGuardHook {
     public static void registerFlag() {
         FlagRegistry registry = WorldGuard.getInstance().getFlagRegistry();
         try {
-            StateFlag flag = new StateFlag("break-only-player-blocks", false);
+            // Đăng ký với giá trị mặc định là ALLOW
+            StateFlag flag = new StateFlag("break-only-player-blocks", true);
             registry.register(flag);
             ONLY_PLAYER_BLOCKS = flag;
         } catch (FlagConflictException e) {
@@ -32,31 +31,32 @@ public class WorldGuardHook {
         }
     }
 
-    public static boolean shouldProtect(PlayerBlockShield plugin, Location loc, Player player) {
+    /**
+     * Kiểm tra xem tại vị trí này plugin có quản trị việc bảo vệ khối hay không.
+     * Lưu ý: Không truyền LocalPlayer vào queryState để tránh bị ảnh hưởng bởi
+     * quyền thành viên của Region.
+     */
+    public static boolean isShieldActiveAt(PlayerBlockShield plugin, Location loc) {
         if (loc.getWorld() == null) return false;
 
-        // 1. Kiem tra world
+        // 1. Kiểm tra danh sách thế giới áp dụng
         if (!plugin.getConfig().getStringList("enabled-worlds").contains(loc.getWorld().getName())) {
             return false;
         }
 
-        // 2. Kiem tra bypass
-        if (player != null && player.hasPermission("pbs.bypass")) {
-            return false;
-        }
-
-        // 3. Kiem tra WorldGuard Region
+        // 2. Kiểm tra Region WorldGuard
         RegionContainer container = WorldGuard.getInstance().getPlatform().getRegionContainer();
         RegionQuery query = container.createQuery();
         ApplicableRegionSet set = query.getApplicableRegions(BukkitAdapter.adapt(loc));
 
         String mode = plugin.getConfig().getString("application-mode", "WORLD_WIDE");
-        var wgPlayer = player != null ? WorldGuardPlugin.inst().wrapPlayer(player) : null;
 
         if ("REGION_ONLY".equalsIgnoreCase(mode)) {
-            return set.testState(wgPlayer, ONLY_PLAYER_BLOCKS);
+            // Chỉ bật nếu region có gán flag allow
+            return set.queryState(null, ONLY_PLAYER_BLOCKS) == StateFlag.State.ALLOW;
         } else {
-            return set.queryState(wgPlayer, ONLY_PLAYER_BLOCKS) != StateFlag.State.DENY;
+            // WORLD_WIDE: Bật mọi nơi, trừ khi region bị set deny
+            return set.queryState(null, ONLY_PLAYER_BLOCKS) != StateFlag.State.DENY;
         }
     }
 }
