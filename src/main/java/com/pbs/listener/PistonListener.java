@@ -22,7 +22,7 @@ public class PistonListener implements Listener {
         if (!plugin.getConfig().getBoolean("pistons.prevent-moving-player-blocks", true)) return;
 
         for (Block block : event.getBlocks()) {
-            if (WorldGuardHook.shouldProtect(plugin, block.getLocation(), null)
+            if (WorldGuardHook.isShieldActiveAt(plugin, block.getLocation())
                     && plugin.getDataManager().isPlayerPlaced(block.getLocation())) {
                 event.setCancelled(true);
                 return;
@@ -35,11 +35,9 @@ public class PistonListener implements Listener {
         if (!plugin.getConfig().getBoolean("pistons.prevent-moving-player-blocks", true)) return;
 
         for (Block block : event.getBlocks()) {
-            if (WorldGuardHook.shouldProtect(plugin, block.getLocation(), null)
+            if (WorldGuardHook.isShieldActiveAt(plugin, block.getLocation())
                     && plugin.getDataManager().isPlayerPlaced(block.getLocation())) {
                 event.setCancelled(true);
                 return;
             }
         }
-    }
-}
