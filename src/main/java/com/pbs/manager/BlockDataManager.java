@@ -19,11 +19,10 @@ public class BlockDataManager {
     // Cache: WorldName -> ChunkKey -> Set<PackedBlockPos>
     private final Map<String, Map<Long, Set<Integer>>> chunkCache = new ConcurrentHashMap<>();
 
-    // Queue Batch I/O
-    private final ConcurrentLinkedQueue<Record> insertQueue = new ConcurrentLinkedQueue<>();
-    private final ConcurrentLinkedQueue<Record> deleteQueue = new ConcurrentLinkedQueue<>();
+    // Một hàng đợi duy nhất giữ đúng thứ tự thời gian (Đặt -> Phá -> Đặt)
+    private final ConcurrentLinkedQueue<DbOperation> operationQueue = new ConcurrentLinkedQueue<>();
 
-    private record Record(String world, long chunkKey, int packedPos) {}
+    private record DbOperation(String world, long chunkKey, int packedPos, boolean isInsert) {}
 
     public BlockDataManager(PlayerBlockShield plugin) {
         this.plugin = plugin;
@@ -46,9 +45,9 @@ public class BlockDataManager {
                         chunk_key INTEGER NOT NULL,
                         block_pos INTEGER NOT NULL,
                         PRIMARY KEY (world, chunk_key, block_pos)
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_chunk ON player_blocks(world, chunk_key);
+                    )
                 """);
+                st.execute("CREATE INDEX IF NOT EXISTS idx_chunk ON player_blocks(world, chunk_key)");
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Khong the khoi tao SQLite: " + e.getMessage());
@@ -59,7 +58,6 @@ public class BlockDataManager {
         return ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
     }
 
-    // Nen toa do relative vao 1 so Integer duy nhat (-128 <= Y <= 1920)
     public static int packPosition(int x, int y, int z) {
         return ((x & 0xF) << 15) | ((z & 0xF) << 11) | ((y + 128) & 0x7FF);
     }
@@ -68,10 +66,11 @@ public class BlockDataManager {
         long key = getChunkKey(cx, cz);
         String worldName = world.getName();
 
-        Set<Integer> set = ConcurrentHashMap.newKeySet();
-        chunkCache.computeIfAbsent(worldName, w -> new ConcurrentHashMap<>()).put(key, set);
+        // Không ghi đè nếu chunk đã có sẵn dữ liệu trong RAM
+        Set<Integer> set = chunkCache
+                .computeIfAbsent(worldName, w -> new ConcurrentHashMap<>())
+                .computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet());
 
-        // Load sync nhe tu DB (chi doc index ~0.05ms)
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT block_pos FROM player_blocks WHERE world = ? AND chunk_key = ?")) {
             ps.setString(1, worldName);
@@ -86,6 +85,7 @@ public class BlockDataManager {
     }
 
     public void unloadChunk(World world, int cx, int cz) {
+        flushSync();
         long key = getChunkKey(cx, cz);
         Map<Long, Set<Integer>> worldMap = chunkCache.get(world.getName());
         if (worldMap != null) {
@@ -116,7 +116,7 @@ public class BlockDataManager {
                   .computeIfAbsent(cKey, c -> ConcurrentHashMap.newKeySet())
                   .add(packed);
 
-        insertQueue.add(new Record(wName, cKey, packed));
+        operationQueue.add(new DbOperation(wName, cKey, packed, true));
     }
 
     public void removeBlock(Location loc) {
@@ -133,45 +133,36 @@ public class BlockDataManager {
             }
         }
 
-        deleteQueue.add(new Record(wName, cKey, packed));
+        operationQueue.add(new DbOperation(wName, cKey, packed, false));
     }
 
     private void startBatchFlusher() {
-        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::flushSync, 100L, 100L); // 5 giay ghi DB 1 lan
+        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::flushSync, 100L, 100L);
     }
 
     public synchronized void flushSync() {
-        if (connection == null) return;
+        if (connection == null || operationQueue.isEmpty()) return;
         try {
             connection.setAutoCommit(false);
 
-            // Ghi batch inserts
-            if (!insertQueue.isEmpty()) {
-                try (PreparedStatement ps = connection.prepareStatement(
-                        "INSERT OR IGNORE INTO player_blocks (world, chunk_key, block_pos) VALUES (?, ?, ?)")) {
-                    Record r;
-                    while ((r = insertQueue.poll()) != null) {
-                        ps.setString(1, r.world());
-                        ps.setLong(2, r.chunkKey());
-                        ps.setInt(3, r.packedPos());
-                        ps.addBatch();
-                    }
-                    ps.executeBatch();
-                }
-            }
+            try (PreparedStatement insertPs = connection.prepareStatement(
+                    "INSERT OR IGNORE INTO player_blocks (world, chunk_key, block_pos) VALUES (?, ?, ?)");
+                 PreparedStatement deletePs = connection.prepareStatement(
+                    "DELETE FROM player_blocks WHERE world = ? AND chunk_key = ? AND block_pos = ?")) {
 
-            // Ghi batch deletes
-            if (!deleteQueue.isEmpty()) {
-                try (PreparedStatement ps = connection.prepareStatement(
-                        "DELETE FROM player_blocks WHERE world = ? AND chunk_key = ? AND block_pos = ?")) {
-                    Record r;
-                    while ((r = deleteQueue.poll()) != null) {
-                        ps.setString(1, r.world());
-                        ps.setLong(2, r.chunkKey());
-                        ps.setInt(3, r.packedPos());
-                        ps.addBatch();
+                DbOperation op;
+                while ((op = operationQueue.poll()) != null) {
+                    if (op.isInsert()) {
+                        insertPs.setString(1, op.world());
+                        insertPs.setLong(2, op.chunkKey());
+                        insertPs.setInt(3, op.packedPos());
+                        insertPs.executeUpdate();
+                    } else {
+                        deletePs.setString(1, op.world());
+                        deletePs.setLong(2, op.chunkKey());
+                        deletePs.setInt(3, op.packedPos());
+                        deletePs.executeUpdate();
                     }
-                    ps.executeBatch();
                 }
             }
 
