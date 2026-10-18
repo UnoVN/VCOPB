@@ -20,12 +20,12 @@ public class ExplosionListener implements Listener {
         this.plugin = plugin;
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityExplode(EntityExplodeEvent event) {
         handleExplosion(event.blockList());
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockExplode(BlockExplodeEvent event) {
         handleExplosion(event.blockList());
     }
@@ -35,17 +35,19 @@ public class ExplosionListener implements Listener {
 
         blocks.removeIf(block -> {
             Location loc = block.getLocation();
-            if (!WorldGuardHook.shouldProtect(plugin, loc, null)) {
+
+            // Nếu ngoài vùng bảo vệ -> Giữ nguyên để nổ bình thường
+            if (!WorldGuardHook.isShieldActiveAt(plugin, loc)) {
                 return false;
             }
 
             boolean isPlayerPlaced = plugin.getDataManager().isPlayerPlaced(loc);
 
             if (!isPlayerPlaced) {
-                // Khối tự nhiên -> Giữ nguyên (loại khỏi danh sách nổ)
+                // Khối tự nhiên -> LOẠI KHỎI danh sách nổ (Bảo toàn Map)
                 return true;
             } else {
-                // Khối do người chơi đặt -> Cho nổ và xóa khỏi data
+                // Khối do người chơi đặt -> Giữ lại trong danh sách nổ và xóa khỏi DB
                 if (damagePlayerBlocks) {
                     plugin.getDataManager().removeBlock(loc);
                     return false;
