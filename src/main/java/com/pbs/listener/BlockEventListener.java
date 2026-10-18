@@ -24,29 +24,46 @@ public class BlockEventListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
         Location loc = event.getBlock().getLocation();
-        if (WorldGuardHook.shouldProtect(plugin, loc, event.getPlayer())) {
+        
+        // Chỉ cần vị trí nằm trong khu vực áp dụng Shield -> Lưu lại ngay lập tức
+        // Bất kể người đặt có OP hay không có OP
+        if (WorldGuardHook.isShieldActiveAt(plugin, loc)) {
             plugin.getDataManager().addBlock(loc);
         }
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
         Location loc = block.getLocation();
         Player player = event.getPlayer();
 
-        if (!WorldGuardHook.shouldProtect(plugin, loc, player)) {
+        // 1. Nếu vị trí không nằm trong phạm vi quản lý -> Bỏ qua cho WorldGuard tự xử
+        if (!WorldGuardHook.isShieldActiveAt(plugin, loc)) {
             return;
         }
 
-        if (!plugin.getDataManager().isPlayerPlaced(loc)) {
+        // 2. Nếu người chơi có quyền Bypass (Admin/Staff) -> Cho phép phá tất cả
+        if (player.hasPermission("pbs.bypass")) {
+            event.setCancelled(false);
+            plugin.getDataManager().removeBlock(loc);
+            return;
+        }
+
+        // 3. Kiểm tra xem khối này có phải do người chơi đặt không
+        boolean isPlayerPlaced = plugin.getDataManager().isPlayerPlaced(loc);
+
+        if (isPlayerPlaced) {
+            // Đúng khối người chơi đặt:
+            // Gỡ bỏ lệnh cancel của WorldGuard (nếu có) và cho phép đập
+            event.setCancelled(false);
+            plugin.getDataManager().removeBlock(loc);
+        } else {
+            // Khối tự nhiên của Map: Hủy hành vi đập
             event.setCancelled(true);
-            String msg = plugin.getConfig().getString("messages.cannot-break", "&cKhong the pha block nay!");
+            String msg = plugin.getConfig().getString("messages.cannot-break", "&cKhong the pha block tu nhien!");
             player.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
-            return;
         }
-
-        plugin.getDataManager().removeBlock(loc);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
