@@ -1,5 +1,5 @@
 name: PlayerBlockShield
-version: '1.0.0'
+version: '1.0.1'
 main: com.pbs.PlayerBlockShield
 api-version: '1.20'
 depend: [WorldGuard]
@@ -8,11 +8,11 @@ commands:
   pbs:
     description: Lenh quan tri PlayerBlockShield
     permission: pbs.admin
-    usage: /<command> reload
+    usage: /<command> <reload|clear>
 permissions:
   pbs.admin:
-    description: Quyen dung lenh reload
+    description: Quyen dung lenh quan tri pbs
     default: op
   pbs.bypass:
-    description: Quyen pha moi block bat ke nguon goc
+    description: Quyen pha moi block va dat block map bat ke nguon goc
     default: op
