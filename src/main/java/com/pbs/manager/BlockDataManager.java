@@ -19,7 +19,7 @@ public class BlockDataManager {
     // Cache: WorldName -> ChunkKey -> Set<PackedBlockPos>
     private final Map<String, Map<Long, Set<Integer>>> chunkCache = new ConcurrentHashMap<>();
 
-    // Một hàng đợi duy nhất giữ đúng thứ tự thời gian (Đặt -> Phá -> Đặt)
+    // Hàng đợi duy nhất giữ đúng thứ tự thời gian (Đặt -> Phá -> Đặt)
     private final ConcurrentLinkedQueue<DbOperation> operationQueue = new ConcurrentLinkedQueue<>();
 
     private record DbOperation(String world, long chunkKey, int packedPos, boolean isInsert) {}
@@ -30,7 +30,7 @@ public class BlockDataManager {
         startBatchFlusher();
     }
 
-    private void initDatabase() {
+    private synchronized void initDatabase() {
         try {
             File dataFolder = plugin.getDataFolder();
             if (!dataFolder.exists()) dataFolder.mkdirs();
@@ -62,11 +62,17 @@ public class BlockDataManager {
         return ((x & 0xF) << 15) | ((z & 0xF) << 11) | ((y + 128) & 0x7FF);
     }
 
-    public void loadChunk(World world, int cx, int cz) {
+    public synchronized void loadChunk(World world, int cx, int cz) {
+        if (connection == null) return;
+
+        // Đảm bảo mọi thao tác chờ trong hàng đợi đã được ghi xuống DB trước khi đọc
+        if (!operationQueue.isEmpty()) {
+            flushSync();
+        }
+
         long key = getChunkKey(cx, cz);
         String worldName = world.getName();
 
-        // Không ghi đè nếu chunk đã có sẵn dữ liệu trong RAM
         Set<Integer> set = chunkCache
                 .computeIfAbsent(worldName, w -> new ConcurrentHashMap<>())
                 .computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet());
@@ -75,16 +81,17 @@ public class BlockDataManager {
                 "SELECT block_pos FROM player_blocks WHERE world = ? AND chunk_key = ?")) {
             ps.setString(1, worldName);
             ps.setLong(2, key);
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                set.add(rs.getInt("block_pos"));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    set.add(rs.getInt("block_pos"));
+                }
             }
         } catch (SQLException e) {
             plugin.getLogger().warning("Loi doc chunk cache: " + e.getMessage());
         }
     }
 
-    public void unloadChunk(World world, int cx, int cz) {
+    public synchronized void unloadChunk(World world, int cx, int cz) {
         flushSync();
         long key = getChunkKey(cx, cz);
         Map<Long, Set<Integer>> worldMap = chunkCache.get(world.getName());
@@ -94,7 +101,7 @@ public class BlockDataManager {
     }
 
     public boolean isPlayerPlaced(Location loc) {
-        if (loc.getWorld() == null) return false;
+        if (loc == null || loc.getWorld() == null) return false;
         Map<Long, Set<Integer>> worldMap = chunkCache.get(loc.getWorld().getName());
         if (worldMap == null) return false;
 
@@ -107,7 +114,7 @@ public class BlockDataManager {
     }
 
     public void addBlock(Location loc) {
-        if (loc.getWorld() == null) return;
+        if (loc == null || loc.getWorld() == null) return;
         String wName = loc.getWorld().getName();
         long cKey = getChunkKey(loc.getBlockX() >> 4, loc.getBlockZ() >> 4);
         int packed = packPosition(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
@@ -120,7 +127,7 @@ public class BlockDataManager {
     }
 
     public void removeBlock(Location loc) {
-        if (loc.getWorld() == null) return;
+        if (loc == null || loc.getWorld() == null) return;
         String wName = loc.getWorld().getName();
         long cKey = getChunkKey(loc.getBlockX() >> 4, loc.getBlockZ() >> 4);
         int packed = packPosition(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
@@ -134,6 +141,21 @@ public class BlockDataManager {
         }
 
         operationQueue.add(new DbOperation(wName, cKey, packed, false));
+    }
+
+    public synchronized void clearAll() {
+        operationQueue.clear();
+        for (Map<Long, Set<Integer>> worldMap : chunkCache.values()) {
+            for (Set<Integer> blockSet : worldMap.values()) {
+                blockSet.clear();
+            }
+        }
+        if (connection == null) return;
+        try (Statement st = connection.createStatement()) {
+            st.execute("DELETE FROM player_blocks");
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Loi xoa database: " + e.getMessage());
+        }
     }
 
     private void startBatchFlusher() {
@@ -167,13 +189,19 @@ public class BlockDataManager {
             }
 
             connection.commit();
-            connection.setAutoCommit(true);
         } catch (SQLException e) {
             plugin.getLogger().warning("Loi flush database: " + e.getMessage());
+            try {
+                connection.rollback();
+            } catch (SQLException ignored) {}
+        } finally {
+            try {
+                connection.setAutoCommit(true);
+            } catch (SQLException ignored) {}
         }
     }
 
-    public void close() {
+    public synchronized void close() {
         flushSync();
         try {
             if (connection != null && !connection.isClosed()) {
