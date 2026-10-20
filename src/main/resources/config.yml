@@ -9,6 +9,10 @@ enabled-worlds:
 # - "REGION_ONLY": Chi bat tai cac region co set 'break-only-player-blocks: allow'
 application-mode: "WORLD_WIDE"
 
+# Bao ve block do OP (hoac nguoi co quyen pbs.bypass) dat ra nhu block cua Map goc
+# Khi bat true: Block do OP dat ra se KHONG bi pha boi TNT, TNT Cart, Crystal hay nguoi choi thuong
+protect-op-placed-blocks: true
+
 # Xu ly chay no (TNT, TNT Minecart, End Crystal, Creeper, Giuong)
 explosions:
   damage-player-blocks: true
@@ -23,3 +27,4 @@ messages:
   prefix: "&8[&cShield&8] "
   cannot-break: "&cBan chi co the pha huy cac khoi do nguoi choi dat!"
   reload-success: "&aDa cap nhat lai config thanh cong!"
+  clear-success: "&aDa xoa sach du lieu block nguoi choi! Toan bo map hien tai da duoc bao ve!"
